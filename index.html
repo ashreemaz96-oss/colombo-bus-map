@@ -1,9 +1,373 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Colombo Bus Map</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Colombo Bus Overcrowding & Delay Map</title>
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+  <!-- Leaflet MarkerCluster CSS -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.css"/>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.css"/>
+
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Segoe UI', sans-serif; background: #1a1a2e; color: #eee; }
+
+    #header {
+      background: #16213e;
+      padding: 10px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 2px solid #e94560;
+      z-index: 1000;
+      position: relative;
+    }
+    #header h1 { font-size: 1.1rem; color: #fff; }
+    #header span { font-size: 0.75rem; color: #aaa; }
+
+    #report-btn {
+      background: #e94560;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: bold;
+      font-size: 0.9rem;
+    }
+    #report-btn:hover { background: #c73652; }
+
+    #map { height: calc(100vh - 52px); width: 100%; }
+
+    /* Legend */
+    .legend {
+      background: rgba(22,33,62,0.95);
+      padding: 12px 16px;
+      border-radius: 8px;
+      border: 1px solid #e94560;
+      color: #eee;
+      font-size: 0.82rem;
+      line-height: 1.8;
+      min-width: 160px;
+    }
+    .legend h4 { margin-bottom: 6px; color: #e94560; font-size: 0.9rem; }
+    .legend-dot {
+      display: inline-block;
+      width: 12px; height: 12px;
+      border-radius: 50%;
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+
+    /* Filter panel */
+    .filter-panel {
+      background: rgba(22,33,62,0.95);
+      padding: 10px 14px;
+      border-radius: 8px;
+      border: 1px solid #444;
+      font-size: 0.82rem;
+      color: #eee;
+    }
+    .filter-panel h4 { margin-bottom: 8px; color: #e94560; }
+    .filter-panel label { display: block; margin-bottom: 4px; cursor: pointer; }
+    .filter-panel input[type=checkbox] { margin-right: 6px; }
+
+    /* Stats bar */
+    #stats-bar {
+      position: absolute;
+      bottom: 30px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(22,33,62,0.92);
+      border: 1px solid #e94560;
+      border-radius: 10px;
+      padding: 8px 20px;
+      display: flex;
+      gap: 24px;
+      z-index: 999;
+      font-size: 0.8rem;
+    }
+    .stat-item { text-align: center; }
+    .stat-item .num { font-size: 1.3rem; font-weight: bold; color: #e94560; }
+    .stat-item .lbl { color: #aaa; }
+
+    /* Popup styles */
+    .leaflet-popup-content-wrapper {
+      background: #16213e;
+      color: #eee;
+      border: 1px solid #e94560;
+      border-radius: 8px;
+    }
+    .leaflet-popup-tip { background: #16213e; }
+    .popup-type { font-weight: bold; color: #e94560; font-size: 0.95rem; }
+    .popup-row { margin: 3px 0; font-size: 0.85rem; }
+    .popup-row span { color: #aaa; }
+  </style>
 </head>
 <body>
-    <h1>Colombo Bus Map</h1>
+
+<div id="header">
+  <div>
+    <h1>🚌 Colombo Bus Overcrowding & Delay Map</h1>
+    <span>CMC Area | Crowdsourced Real-Time Reporting</span>
+  </div>
+  <button id="report-btn" onclick="openReportForm()">+ Submit a Report</button>
+</div>
+
+<div id="map"></div>
+
+<div id="stats-bar">
+  <div class="stat-item">
+    <div class="num" id="stat-total">0</div>
+    <div class="lbl">Total Reports</div>
+  </div>
+  <div class="stat-item">
+    <div class="num" id="stat-crowd">0</div>
+    <div class="lbl">Overcrowding</div>
+  </div>
+  <div class="stat-item">
+    <div class="num" id="stat-delay">0</div>
+    <div class="lbl">Delays</div>
+  </div>
+  <div class="stat-item">
+    <div class="num" id="stat-misc">0</div>
+    <div class="lbl">Misconduct</div>
+  </div>
+  <div class="stat-item">
+    <div class="num" id="stat-lost">0</div>
+    <div class="lbl">Lost Items</div>
+  </div>
+</div>
+
+<!-- Leaflet JS -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.min.js"></script>
+<!-- PapaParse for CSV -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+
+<script>
+// =============================================
+// CONFIG — UPDATE THESE
+// =============================================
+const GOOGLE_SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRasFFahZ99QPZhYfeAgFIEw5mf5yievDY4JCd55WArORfjk_5NVFKjo50qoyI36PF1e4iUT7kKS0Hr/pub?output=csv';
+const GOOGLE_FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSeGCGK3xjOS-F8s1BXwow29UaXNWmXQ3mWYUddt2apAiLO6ug/viewform?usp=preview';
+// Column names must match your Google Sheet headers exactly
+const COL = {
+  type: 'Report Type',
+  route: 'Bus Route Number',
+  stop: 'Bus Stop / Location Name',
+  crowding: 'Crowding Level',
+  delay: 'Delay Duration (minutes)',
+  description: 'Issue Description',
+  time: 'Time of Incident',
+  timestamp: 'Timestamp'
+};
+// =============================================
+
+// Colour map per report type
+const COLORS = {
+  'Overcrowding': '#e94560',
+  'Delay':        '#f5a623',
+  'Lost Item':    '#4ecdc4',
+  'Misconduct':   '#a855f7',
+  'default':      '#aaa'
+};
+
+// Bus stop icon
+const busStopIcon = L.divIcon({
+  className: '',
+  html: `<div style="width:10px;height:10px;background:#00d4ff;border-radius:50%;border:2px solid #fff;"></div>`,
+  iconSize: [10, 10],
+  iconAnchor: [5, 5]
+});
+
+// Initialise map centred on Colombo
+const map = L.map('map').setView([6.9271, 79.8612], 13);
+
+// Basemap
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '© OpenStreetMap contributors',
+  maxZoom: 19
+}).addTo(map);
+
+// ---- Load GeoJSON layers ----
+fetch('data/cmc_boundary.geojson')
+  .then(r => r.json())
+  .then(data => {
+    L.geoJSON(data, {
+      style: { color: '#e94560', weight: 2, fillOpacity: 0.05, fillColor: '#e94560' }
+    }).addTo(map);
+  });
+
+fetch('data/road_network.geojson')
+  .then(r => r.json())
+  .then(data => {
+    L.geoJSON(data, {
+      style: { color: '#444', weight: 1, opacity: 0.7 }
+    }).addTo(map);
+  });
+
+let busStopsLayer;
+fetch('data/bus_stops.geojson')
+  .then(r => r.json())
+  .then(data => {
+    busStopsLayer = L.geoJSON(data, {
+      pointToLayer: (f, latlng) => L.marker(latlng, { icon: busStopIcon }),
+      onEachFeature: (f, layer) => {
+        const name = f.properties.name || f.properties.Name || 'Bus Stop';
+        layer.bindPopup(`<b style="color:#00d4ff">${name}</b><br><small>Bus Stop</small>`);
+      }
+    }).addTo(map);
+  });
+
+// ---- Marker cluster group for reports ----
+let allReports = [];
+const reportLayers = {
+  'Overcrowding': L.markerClusterGroup(),
+  'Delay':        L.markerClusterGroup(),
+  'Lost Item':    L.markerClusterGroup(),
+  'Misconduct':   L.markerClusterGroup(),
+};
+Object.values(reportLayers).forEach(l => l.addTo(map));
+
+// ---- Geocode stop name using Nominatim ----
+async function geocodeStop(stopName) {
+  const query = stopName + ', Colombo, Sri Lanka';
+  const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1`;
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data.length > 0) return [parseFloat(data[0].lat), parseFloat(data[0].lon)];
+  } catch(e) {}
+  return null;
+}
+
+// ---- Load reports from Google Sheets CSV ----
+async function loadReports() {
+  if (!GOOGLE_SHEET_CSV_URL || GOOGLE_SHEET_CSV_URL === 'YOUR_PUBLISHED_CSV_URL_HERE') return;
+
+  Papa.parse(GOOGLE_SHEET_CSV_URL, {
+    download: true,
+    header: true,
+    complete: async (results) => {
+      const rows = results.data.filter(r => r[COL.type]);
+      allReports = rows;
+
+      // Clear existing report markers
+      Object.values(reportLayers).forEach(l => l.clearLayers());
+
+      let counts = { total: rows.length, Overcrowding: 0, Delay: 0, Misconduct: 0, 'Lost Item': 0 };
+
+      for (const row of rows) {
+        const type = row[COL.type] || 'default';
+        counts[type] = (counts[type] || 0) + 1;
+
+        const stopName = row[COL.stop];
+        if (!stopName) continue;
+
+        const latlng = await geocodeStop(stopName);
+        if (!latlng) continue;
+
+        const color = COLORS[type] || COLORS.default;
+        const marker = L.circleMarker(latlng, {
+          radius: 9,
+          fillColor: color,
+          color: '#fff',
+          weight: 1.5,
+          fillOpacity: 0.85
+        });
+
+        const crowding = row[COL.crowding] ? `<div class="popup-row"><span>Crowding:</span> ${row[COL.crowding]}</div>` : '';
+        const delay = row[COL.delay] ? `<div class="popup-row"><span>Delay:</span> ${row[COL.delay]} min</div>` : '';
+        const desc = row[COL.description] ? `<div class="popup-row"><span>Details:</span> ${row[COL.description]}</div>` : '';
+        const time = row[COL.time] || row[COL.timestamp] || '';
+
+        marker.bindPopup(`
+          <div class="popup-type">${type}</div>
+          <div class="popup-row"><span>Route:</span> ${row[COL.route] || 'N/A'}</div>
+          <div class="popup-row"><span>Stop:</span> ${stopName}</div>
+          ${crowding}${delay}${desc}
+          <div class="popup-row"><span>Reported:</span> ${time}</div>
+        `);
+
+        const targetLayer = reportLayers[type] || reportLayers['Overcrowding'];
+        targetLayer.addLayer(marker);
+      }
+
+      // Update stats
+      document.getElementById('stat-total').textContent = counts.total;
+      document.getElementById('stat-crowd').textContent = counts['Overcrowding'] || 0;
+      document.getElementById('stat-delay').textContent = counts['Delay'] || 0;
+      document.getElementById('stat-misc').textContent = counts['Misconduct'] || 0;
+      document.getElementById('stat-lost').textContent = counts['Lost Item'] || 0;
+    }
+  });
+}
+
+loadReports();
+// Refresh every 5 minutes
+setInterval(loadReports, 5 * 60 * 1000);
+
+// ---- Legend ----
+const legend = L.control({ position: 'bottomright' });
+legend.onAdd = () => {
+  const div = L.DomUtil.create('div', 'legend');
+  div.innerHTML = `
+    <h4>Report Types</h4>
+    ${Object.entries(COLORS).filter(([k]) => k !== 'default').map(([type, color]) =>
+      `<div><span class="legend-dot" style="background:${color}"></span>${type}</div>`
+    ).join('')}
+    <hr style="border-color:#444;margin:8px 0">
+    <div><span class="legend-dot" style="background:#00d4ff"></span>Bus Stop</div>
+  `;
+  return div;
+};
+legend.addTo(map);
+
+// ---- Filter panel ----
+const filterControl = L.control({ position: 'topright' });
+filterControl.onAdd = () => {
+  const div = L.DomUtil.create('div', 'filter-panel');
+  div.innerHTML = `
+    <h4>Filter Reports</h4>
+    ${Object.keys(reportLayers).map(type => `
+      <label>
+        <input type="checkbox" checked onchange="toggleLayer('${type}', this.checked)">
+        ${type}
+      </label>
+    `).join('')}
+    <hr style="border-color:#444;margin:6px 0">
+    <label>
+      <input type="checkbox" checked onchange="toggleBusStops(this.checked)">
+      Bus Stops
+    </label>
+  `;
+  L.DomEvent.disableClickPropagation(div);
+  return div;
+};
+filterControl.addTo(map);
+
+function toggleLayer(type, show) {
+  if (show) map.addLayer(reportLayers[type]);
+  else map.removeLayer(reportLayers[type]);
+}
+function toggleBusStops(show) {
+  if (!busStopsLayer) return;
+  if (show) map.addLayer(busStopsLayer);
+  else map.removeLayer(busStopsLayer);
+}
+
+// ---- Report button ----
+function openReportForm() {
+  if (!GOOGLE_FORM_URL || GOOGLE_FORM_URL === 'YOUR_GOOGLE_FORM_URL_HERE') {
+    alert('Google Form URL not configured yet.');
+    return;
+  }
+  window.open(GOOGLE_FORM_URL, '_blank');
+}
+</script>
 </body>
 </html>
