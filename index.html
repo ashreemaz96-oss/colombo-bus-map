@@ -64,10 +64,7 @@
     #map { height: calc(100vh - 54px); width: 100%; }
 
     /* ── Pulsing user location dot ── */
-    .user-location-marker {
-      position: relative;
-      width: 18px; height: 18px;
-    }
+    .user-location-marker { position: relative; width: 18px; height: 18px; }
     .user-location-marker .dot {
       width: 14px; height: 14px;
       background: #2563eb;
@@ -109,7 +106,7 @@
       background: rgba(15,23,42,0.92);
       border: 2px solid transparent;
       border-radius: 12px;
-      padding: 10px 14px;
+      padding: 10px 16px;
       text-align: center;
       cursor: pointer;
       transition: all 0.2s;
@@ -133,9 +130,9 @@
     .stat-card.active[data-type="Misconduct"]   { border-color: var(--purple); background: rgba(168,85,247,0.15); }
     .stat-card.active[data-type="Lost Item"]    { border-color: var(--teal);   background: rgba(78,205,196,0.15); }
 
-    .stat-card .s-icon { font-size: 1.2rem; display: block; margin-bottom: 2px; }
-    .stat-card .s-num  { font-size: 1.4rem; font-weight: 800; line-height: 1; }
-    .stat-card .s-lbl  { font-size: 0.65rem; color: var(--sub); margin-top: 2px; line-height: 1.2; }
+    /* Number only — no icon row */
+    .stat-card .s-num  { font-size: 1.6rem; font-weight: 800; line-height: 1; }
+    .stat-card .s-lbl  { font-size: 0.65rem; color: var(--sub); margin-top: 4px; line-height: 1.25; }
 
     .stat-card[data-type="all"] .s-num          { color: var(--red); }
     .stat-card[data-type="Overcrowding"] .s-num { color: var(--red); }
@@ -164,21 +161,15 @@
     }
     #filter-banner.visible { display: flex; }
     #filter-banner .clear-btn {
-      background: none;
-      border: none;
-      color: var(--sub);
-      cursor: pointer;
-      font-size: 1rem;
-      line-height: 1;
-      padding: 0 2px;
+      background: none; border: none; color: var(--sub);
+      cursor: pointer; font-size: 1rem; line-height: 1; padding: 0 2px;
     }
     #filter-banner .clear-btn:hover { color: var(--red); }
 
     /* ── Refresh indicator ── */
     #refresh-pill {
       position: absolute;
-      top: 64px;
-      right: 12px;
+      top: 64px; right: 12px;
       z-index: 1000;
       background: rgba(15,23,42,0.88);
       border: 1px solid var(--border);
@@ -186,11 +177,11 @@
       padding: 5px 10px;
       font-size: 0.72rem;
       color: var(--sub);
-      display: flex;
-      align-items: center;
-      gap: 6px;
+      display: flex; align-items: center; gap: 6px;
       backdrop-filter: blur(6px);
+      cursor: pointer;
     }
+    #refresh-pill:hover { border-color: var(--cyan); color: var(--text); }
     #refresh-pill .dot {
       width: 7px; height: 7px;
       border-radius: 50%;
@@ -333,36 +324,31 @@
 </div>
 
 <!-- ── Refresh pill ── -->
-<div id="refresh-pill">
+<div id="refresh-pill" onclick="manualRefresh()" title="Click to refresh now">
   <div class="dot" id="refresh-dot"></div>
   <span id="refresh-label">Live</span>
   <span class="countdown" id="refresh-countdown">60s</span>
 </div>
 
-<!-- ── Stats panel ── -->
+<!-- ── Stats panel (numbers only, no icons) ── -->
 <div id="stats-panel">
   <div class="stat-card active" data-type="all" onclick="filterByType('all')">
-    <span class="s-icon">🗂️</span>
     <div class="s-num" id="stat-total">0</div>
     <div class="s-lbl">All<br>Reports</div>
   </div>
   <div class="stat-card" data-type="Overcrowding" onclick="filterByType('Overcrowding')">
-    <span class="s-icon">🚌</span>
     <div class="s-num" id="stat-crowd">0</div>
     <div class="s-lbl">Over-<br>crowding</div>
   </div>
   <div class="stat-card" data-type="Delay" onclick="filterByType('Delay')">
-    <span class="s-icon">⏱️</span>
     <div class="s-num" id="stat-delay">0</div>
     <div class="s-lbl">Delays</div>
   </div>
   <div class="stat-card" data-type="Misconduct" onclick="filterByType('Misconduct')">
-    <span class="s-icon">⚠️</span>
     <div class="s-num" id="stat-misc">0</div>
     <div class="s-lbl">Mis-<br>conduct</div>
   </div>
   <div class="stat-card" data-type="Lost Item" onclick="filterByType('Lost Item')">
-    <span class="s-icon">🎒</span>
     <div class="s-num" id="stat-lost">0</div>
     <div class="s-lbl">Lost<br>Items</div>
   </div>
@@ -378,9 +364,9 @@
 // ║  CONFIG — update these two values            ║
 // ╚══════════════════════════════════════════════╝
 const SHEET_CSV_URL  = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRasFFahZ99QPZhYfeAgFIEw5mf5yievDY4JCd55WArORfjk_5NVFKjo50qoyI36PF1e4iUT7kKS0Hr/pub?output=csv';
-const GOOGLE_FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSeGCGK3xjOS-F8s1BXwow29UaXNWmXQ3mWYUddt2apAiLO6ug/viewform?usp=preview';  // your GPS report wrapper page
+const GOOGLE_FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSeGCGK3xjOS-F8s1BXwow29UaXNWmXQ3mWYUddt2apAiLO6ug/viewform?usp=preview';
 
-// Column headers in your Google Sheet — must match exactly
+// Column headers — must match your Google Sheet exactly
 const COL = {
   type:      'Report Type',
   route:     'Bus Route Number',
@@ -390,8 +376,8 @@ const COL = {
   desc:      'Issue Description',
   time:      'Time of Incident',
   timestamp: 'Timestamp',
-  lat:       'Latitude',   // added by report.html GPS capture
-  lng:       'Longitude',  // added by report.html GPS capture
+  lat:       'Latitude',
+  lng:       'Longitude',
 };
 
 // Colours per report type
@@ -448,7 +434,6 @@ fetch('data/bus_stops.geojson').then(r => r.json()).then(data => {
 
 // ── User location ─────────────────────────────
 let userMarker = null;
-let locateWatcher = null;
 
 function locateMe() {
   const btn = document.getElementById('locate-hdr-btn');
@@ -462,14 +447,12 @@ function locateMe() {
       const lat = pos.coords.latitude;
       const lng = pos.coords.longitude;
 
-      // Remove old marker
       if (userMarker) map.removeLayer(userMarker);
 
       const icon = L.divIcon({
         className: '',
         html: `<div class="user-location-marker"><div class="pulse"></div><div class="dot"></div></div>`,
-        iconSize: [18,18],
-        iconAnchor: [9,9]
+        iconSize: [18,18], iconAnchor: [9,9]
       });
 
       userMarker = L.marker([lat, lng], { icon, zIndexOffset: 1000 })
@@ -484,11 +467,7 @@ function locateMe() {
       showToast('📍 Location found');
     },
     (err) => {
-      const msgs = {
-        1: '❌ Location permission denied',
-        2: '❌ Position unavailable',
-        3: '❌ Location request timed out',
-      };
+      const msgs = { 1: '❌ Permission denied', 2: '❌ Position unavailable', 3: '❌ Request timed out' };
       showToast(msgs[err.code] || '❌ Location error');
       btn.textContent = '📍 My Location';
       btn.disabled = false;
@@ -497,21 +476,23 @@ function locateMe() {
   );
 }
 
-// ── Report markers ────────────────────────────
+// ── Report layers (plain LayerGroups, no clustering icons) ──
+// Using LayerGroup instead of MarkerClusterGroup so plain coloured
+// circle markers render directly with no cluster icon overlays.
 const reportLayers = {
-  'Overcrowding': L.markerClusterGroup({ chunkedLoading: true }),
-  'Delay':        L.markerClusterGroup({ chunkedLoading: true }),
-  'Lost Item':    L.markerClusterGroup({ chunkedLoading: true }),
-  'Misconduct':   L.markerClusterGroup({ chunkedLoading: true }),
+  'Overcrowding': L.layerGroup(),
+  'Delay':        L.layerGroup(),
+  'Lost Item':    L.layerGroup(),
+  'Misconduct':   L.layerGroup(),
 };
 Object.values(reportLayers).forEach(l => l.addTo(map));
 
-let activeFilter = 'all';  // currently active stat card filter
+let activeFilter = 'all';
 
-// ── Geocode cache (avoids repeated Nominatim calls) ──
+// ── Geocode cache ──────────────────────────────
 const geocodeCache = {};
 async function geocodeStop(name) {
-  if (geocodeCache[name]) return geocodeCache[name];
+  if (geocodeCache[name] !== undefined) return geocodeCache[name];
   try {
     const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(name + ', Colombo, Sri Lanka')}&format=json&limit=1`;
     const res  = await fetch(url);
@@ -522,80 +503,96 @@ async function geocodeStop(name) {
       return ll;
     }
   } catch(e) {}
+  geocodeCache[name] = null;
   return null;
 }
 
 // ── Load + render reports ─────────────────────
+// KEY FIX: append a cache-busting timestamp to the CSV URL so the browser
+// never serves a stale cached version — this is what makes new Google Form
+// submissions appear on the map without a hard page reload.
 let counts = { total: 0, Overcrowding: 0, Delay: 0, Misconduct: 0, 'Lost Item': 0 };
 
 async function loadReports() {
   setRefreshState('loading');
 
-  Papa.parse(SHEET_CSV_URL, {
-    download: true,
-    header: true,
-    complete: async (results) => {
-      const rows = results.data.filter(r => r[COL.type] && r[COL.type].trim());
+  // Cache-bust: force a fresh fetch from Google Sheets every time
+  const bustUrl = SHEET_CSV_URL + '&cachebust=' + Date.now();
 
-      // Reset
-      Object.values(reportLayers).forEach(l => l.clearLayers());
-      counts = { total: 0, Overcrowding: 0, Delay: 0, Misconduct: 0, 'Lost Item': 0 };
+  return new Promise((resolve) => {
+    Papa.parse(bustUrl, {
+      download: true,
+      header: true,
+      skipEmptyLines: true,
+      complete: async (results) => {
+        const rows = results.data.filter(r => r[COL.type] && r[COL.type].trim());
 
-      for (const row of rows) {
-        const type = row[COL.type].trim();
-        if (!COLORS[type]) continue;
+        // Clear existing markers
+        Object.values(reportLayers).forEach(l => l.clearLayers());
+        counts = { total: 0, Overcrowding: 0, Delay: 0, Misconduct: 0, 'Lost Item': 0 };
 
-        counts.total++;
-        counts[type] = (counts[type] || 0) + 1;
+        for (const row of rows) {
+          const type = (row[COL.type] || '').trim();
+          if (!COLORS[type]) continue;
 
-        // Prefer GPS coords; fallback to geocoding the stop name
-        let latlng = null;
-        const rawLat = parseFloat(row[COL.lat]);
-        const rawLng = parseFloat(row[COL.lng]);
+          counts.total++;
+          counts[type] = (counts[type] || 0) + 1;
 
-        if (!isNaN(rawLat) && !isNaN(rawLng) && rawLat !== 0 && rawLng !== 0) {
-          latlng = [rawLat, rawLng];
-        } else if (row[COL.stop] && row[COL.stop].trim()) {
-          latlng = await geocodeStop(row[COL.stop].trim());
+          // Prefer GPS coords stored by the report wrapper; fallback to geocoding
+          let latlng = null;
+          const rawLat = parseFloat(row[COL.lat]);
+          const rawLng = parseFloat(row[COL.lng]);
+
+          if (!isNaN(rawLat) && !isNaN(rawLng) && rawLat !== 0 && rawLng !== 0) {
+            latlng = [rawLat, rawLng];
+          } else if (row[COL.stop] && row[COL.stop].trim()) {
+            latlng = await geocodeStop(row[COL.stop].trim());
+          }
+
+          if (!latlng) continue;
+
+          const color = COLORS[type];
+
+          // Plain filled circle — no icon, no cluster badge, just a coloured dot
+          const marker = L.circleMarker(latlng, {
+            radius: 9,
+            fillColor: color,
+            color: '#ffffff',
+            weight: 2,
+            fillOpacity: 0.9,
+            opacity: 1,
+          });
+
+          // Popup
+          const crowdRow = row[COL.crowding] ? `<div class="popup-row"><span class="lbl">Crowding: </span>${row[COL.crowding]}</div>` : '';
+          const delayRow = row[COL.delay]    ? `<div class="popup-row"><span class="lbl">Delay: </span>${row[COL.delay]} min</div>` : '';
+          const descRow  = row[COL.desc]     ? `<div class="popup-row"><span class="lbl">Details: </span>${row[COL.desc]}</div>` : '';
+          const timeStr  = row[COL.time] || row[COL.timestamp] || '';
+
+          marker.bindPopup(`
+            <div class="popup-type" style="color:${color}">${TYPE_ICONS[type] || ''} ${type}</div>
+            <div class="popup-row"><span class="lbl">Route: </span>${row[COL.route] || '—'}</div>
+            <div class="popup-row"><span class="lbl">Stop: </span>${row[COL.stop] || '—'}</div>
+            ${crowdRow}${delayRow}${descRow}
+            <div class="popup-row" style="margin-top:5px;color:#64748b;font-size:0.75rem">${timeStr}</div>
+          `);
+
+          reportLayers[type].addLayer(marker);
         }
 
-        if (!latlng) continue;
-
-        const color = COLORS[type];
-        const marker = L.circleMarker(latlng, {
-          radius: 9,
-          fillColor: color,
-          color: '#fff',
-          weight: 1.5,
-          fillOpacity: 0.88,
-        });
-
-        // Popup
-        const crowdRow  = row[COL.crowding] ? `<div class="popup-row"><span class="lbl">Crowding: </span>${row[COL.crowding]}</div>` : '';
-        const delayRow  = row[COL.delay]    ? `<div class="popup-row"><span class="lbl">Delay: </span>${row[COL.delay]} min</div>` : '';
-        const descRow   = row[COL.desc]     ? `<div class="popup-row"><span class="lbl">Details: </span>${row[COL.desc]}</div>` : '';
-        const timeStr   = row[COL.time] || row[COL.timestamp] || '';
-
-        marker.bindPopup(`
-          <div class="popup-type" style="color:${color}">${TYPE_ICONS[type] || ''} ${type}</div>
-          <div class="popup-row"><span class="lbl">Route: </span>${row[COL.route] || '—'}</div>
-          <div class="popup-row"><span class="lbl">Stop: </span>${row[COL.stop] || '—'}</div>
-          ${crowdRow}${delayRow}${descRow}
-          <div class="popup-row" style="margin-top:5px;color:#64748b;font-size:0.75rem">${timeStr}</div>
-        `);
-
-        reportLayers[type].addLayer(marker);
+        updateStats();
+        applyFilter(activeFilter);
+        hideLoading();
+        setRefreshState('live');
+        resolve();
+      },
+      error: () => {
+        showToast('⚠️ Failed to load reports');
+        setRefreshState('live');
+        hideLoading();
+        resolve();
       }
-
-      updateStats();
-      applyFilter(activeFilter);
-      hideLoading();
-      setRefreshState('live');
-    },
-    error: () => {
-      setRefreshState('live');
-      hideLoading();
-    }
+    });
   });
 }
 
@@ -608,18 +605,16 @@ function updateStats() {
   document.getElementById('stat-lost').textContent  = counts['Lost Item'];
 }
 
-// ── Filter by type (from stat card click) ─────
+// ── Filter by type ────────────────────────────
 function filterByType(type) {
   activeFilter = type;
   applyFilter(type);
 
-  // Update card active states
   document.querySelectorAll('.stat-card').forEach(c => c.classList.remove('active'));
   document.querySelector(`.stat-card[data-type="${type}"]`).classList.add('active');
 }
 
 function applyFilter(type) {
-  // Show/hide marker layers
   Object.keys(reportLayers).forEach(t => {
     if (type === 'all' || type === t) {
       if (!map.hasLayer(reportLayers[t])) map.addLayer(reportLayers[t]);
@@ -628,7 +623,6 @@ function applyFilter(type) {
     }
   });
 
-  // Filter banner
   const banner = document.getElementById('filter-banner');
   if (type === 'all') {
     banner.classList.remove('visible');
@@ -638,18 +632,16 @@ function applyFilter(type) {
       `Showing: ${TYPE_ICONS[type]} ${type} (${counts[type] || 0})`;
   }
 
-  // Also respect the layer-visibility checkboxes
   syncCheckboxes();
 }
 
-function clearFilter() {
-  filterByType('all');
-}
+function clearFilter() { filterByType('all'); }
 
-// ── Layer toggle checkboxes ───────────────────
+// ── Layer checkbox sync ───────────────────────
 function syncCheckboxes() {
   Object.keys(reportLayers).forEach(type => {
-    const cb = document.getElementById(`cb-${type.replace(' ', '-')}`);
+    const id = `cb-${type.replace(' ', '-')}`;
+    const cb = document.getElementById(id);
     if (cb) cb.checked = map.hasLayer(reportLayers[type]);
   });
 }
@@ -659,7 +651,6 @@ function toggleLayer(type, show) {
     map.addLayer(reportLayers[type]);
   } else {
     map.removeLayer(reportLayers[type]);
-    // If this layer was the active filter, reset to all
     if (activeFilter === type) {
       activeFilter = 'all';
       document.querySelectorAll('.stat-card').forEach(c => c.classList.remove('active'));
@@ -711,9 +702,9 @@ filterCtrl.onAdd = () => {
 filterCtrl.addTo(map);
 
 // ── Refresh countdown ─────────────────────────
-const REFRESH_INTERVAL = 60; // seconds
+const REFRESH_INTERVAL = 60;
 let countdown = REFRESH_INTERVAL;
-let refreshTimer;
+let refreshTimer = null;
 
 function startCountdown() {
   clearInterval(refreshTimer);
@@ -728,6 +719,14 @@ function startCountdown() {
       loadReports().then(() => startCountdown());
     }
   }, 1000);
+}
+
+// Manual refresh on pill click
+async function manualRefresh() {
+  clearInterval(refreshTimer);
+  showToast('🔄 Refreshing…');
+  await loadReports();
+  startCountdown();
 }
 
 function setRefreshState(state) {
@@ -746,7 +745,7 @@ function setRefreshState(state) {
 function hideLoading() {
   const el = document.getElementById('loading-overlay');
   el.classList.add('hidden');
-  setTimeout(() => el.style.display = 'none', 400);
+  setTimeout(() => { el.style.display = 'none'; }, 400);
 }
 
 // ── Toast ─────────────────────────────────────
@@ -757,9 +756,9 @@ function showToast(msg) {
   setTimeout(() => t.classList.remove('show'), 3000);
 }
 
-// ── Report page ───────────────────────────────
+// ── Report form ───────────────────────────────
 function openReportForm() {
-    window.open(GOOGLE_FORM_URL, '_blank');
+  window.open(GOOGLE_FORM_URL, '_blank');
 }
 
 // ── Boot ──────────────────────────────────────
