@@ -366,19 +366,25 @@
 const SHEET_CSV_URL  = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRasFFahZ99QPZhYfeAgFIEw5mf5yievDY4JCd55WArORfjk_5NVFKjo50qoyI36PF1e4iUT7kKS0Hr/pub?output=csv';
 const GOOGLE_FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSeGCGK3xjOS-F8s1BXwow29UaXNWmXQ3mWYUddt2apAiLO6ug/viewform?usp=preview';
 
-// Column headers — must match your Google Sheet exactly
-const COL = {
-  type:      'Report Type',
-  route:     'Bus Route Number',
-  stop:      'Bus Stop / Location Name',
-  crowding:  'Crowding Level',
-  delay:     'Delay Duration (minutes)',
-  desc:      'Issue Description',
-  time:      'Time of Incident',
-  timestamp: 'Timestamp',
-  lat:       'Latitude',
-  lng:       'Longitude',
+// Google Forms often changes capitalisation and wording in the response sheet.
+// These aliases match the headings visible in your form as well as the old names.
+const COL_ALIASES = {
+  type:      ['Type of Reporting', 'Report Type', 'Type of Report'],
+  route:     ['Bus Route Number', 'Route Number', 'Bus route number'],
+  stop:      ['Bus stop / Location name', 'Bus Stop / Location Name', 'Bus Stop', 'Location Name'],
+  crowding:  ['Crowding Level', 'Crowding level'],
+  delay:     ['Delay Duration (minutes)', 'Delay duration (minutes)', 'Delay Duration'],
+  desc:      ['Issue Description', 'Description', 'Issue description'],
+  time:      ['Time', 'Time of Incident', 'Incident Time'],
+  timestamp: ['Timestamp', 'Submission Time'],
+  lat:       ['Latitude', 'Lat'],
+  lng:       ['Longitude', 'Lng', 'Lon'],
 };
+
+// Optional: add two short-answer questions called Latitude and Longitude to the
+// Google Form, then put their entry IDs here. Leave blank to use stop-name geocoding.
+const FORM_ENTRY_LAT = '';
+const FORM_ENTRY_LNG = '';
 
 // Colours per report type
 const COLORS = {
@@ -434,6 +440,7 @@ fetch('data/bus_stops.geojson').then(r => r.json()).then(data => {
 
 // ── User location ─────────────────────────────
 let userMarker = null;
+let currentLocation = null;
 
 function locateMe() {
   const btn = document.getElementById('locate-hdr-btn');
@@ -446,6 +453,7 @@ function locateMe() {
     (pos) => {
       const lat = pos.coords.latitude;
       const lng = pos.coords.longitude;
+      currentLocation = { lat, lng };
 
       if (userMarker) map.removeLayer(userMarker);
 
@@ -508,92 +516,133 @@ async function geocodeStop(name) {
 }
 
 // ── Load + render reports ─────────────────────
-// KEY FIX: append a cache-busting timestamp to the CSV URL so the browser
-// never serves a stale cached version — this is what makes new Google Form
-// submissions appear on the map without a hard page reload.
+// Header matching is normalised so differences such as "Type of Reporting"
+// versus "Report Type" do not make every count stay at zero.
 let counts = { total: 0, Overcrowding: 0, Delay: 0, Misconduct: 0, 'Lost Item': 0 };
+
+function normaliseText(value) {
+  return String(value ?? '')
+    .replace(/^\uFEFF/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normaliseKey(value) {
+  return normaliseText(value).toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function getCell(row, field) {
+  const wanted = new Set(COL_ALIASES[field].map(normaliseKey));
+  for (const [key, value] of Object.entries(row)) {
+    if (wanted.has(normaliseKey(key))) return normaliseText(value);
+  }
+  return '';
+}
+
+function normaliseType(value) {
+  const key = normaliseKey(value);
+  const aliases = {
+    overcrowding: 'Overcrowding',
+    overcrowded: 'Overcrowding',
+    crowding: 'Overcrowding',
+    delay: 'Delay',
+    delayed: 'Delay',
+    lostitem: 'Lost Item',
+    lostitems: 'Lost Item',
+    misconduct: 'Misconduct',
+  };
+  return aliases[key] || normaliseText(value);
+}
 
 async function loadReports() {
   setRefreshState('loading');
 
-  // Cache-bust: force a fresh fetch from Google Sheets every time
-  const bustUrl = SHEET_CSV_URL + '&cachebust=' + Date.now();
-
-  return new Promise((resolve) => {
-    Papa.parse(bustUrl, {
-      download: true,
-      header: true,
-      skipEmptyLines: true,
-      complete: async (results) => {
-        const rows = results.data.filter(r => r[COL.type] && r[COL.type].trim());
-
-        // Clear existing markers
-        Object.values(reportLayers).forEach(l => l.clearLayers());
-        counts = { total: 0, Overcrowding: 0, Delay: 0, Misconduct: 0, 'Lost Item': 0 };
-
-        for (const row of rows) {
-          const type = (row[COL.type] || '').trim();
-          if (!COLORS[type]) continue;
-
-          counts.total++;
-          counts[type] = (counts[type] || 0) + 1;
-
-          // Prefer GPS coords stored by the report wrapper; fallback to geocoding
-          let latlng = null;
-          const rawLat = parseFloat(row[COL.lat]);
-          const rawLng = parseFloat(row[COL.lng]);
-
-          if (!isNaN(rawLat) && !isNaN(rawLng) && rawLat !== 0 && rawLng !== 0) {
-            latlng = [rawLat, rawLng];
-          } else if (row[COL.stop] && row[COL.stop].trim()) {
-            latlng = await geocodeStop(row[COL.stop].trim());
-          }
-
-          if (!latlng) continue;
-
-          const color = COLORS[type];
-
-          // Plain filled circle — no icon, no cluster badge, just a coloured dot
-          const marker = L.circleMarker(latlng, {
-            radius: 9,
-            fillColor: color,
-            color: '#ffffff',
-            weight: 2,
-            fillOpacity: 0.9,
-            opacity: 1,
-          });
-
-          // Popup
-          const crowdRow = row[COL.crowding] ? `<div class="popup-row"><span class="lbl">Crowding: </span>${row[COL.crowding]}</div>` : '';
-          const delayRow = row[COL.delay]    ? `<div class="popup-row"><span class="lbl">Delay: </span>${row[COL.delay]} min</div>` : '';
-          const descRow  = row[COL.desc]     ? `<div class="popup-row"><span class="lbl">Details: </span>${row[COL.desc]}</div>` : '';
-          const timeStr  = row[COL.time] || row[COL.timestamp] || '';
-
-          marker.bindPopup(`
-            <div class="popup-type" style="color:${color}">${TYPE_ICONS[type] || ''} ${type}</div>
-            <div class="popup-row"><span class="lbl">Route: </span>${row[COL.route] || '—'}</div>
-            <div class="popup-row"><span class="lbl">Stop: </span>${row[COL.stop] || '—'}</div>
-            ${crowdRow}${delayRow}${descRow}
-            <div class="popup-row" style="margin-top:5px;color:#64748b;font-size:0.75rem">${timeStr}</div>
-          `);
-
-          reportLayers[type].addLayer(marker);
-        }
-
-        updateStats();
-        applyFilter(activeFilter);
-        hideLoading();
-        setRefreshState('live');
-        resolve();
-      },
-      error: () => {
-        showToast('⚠️ Failed to load reports');
-        setRefreshState('live');
-        hideLoading();
-        resolve();
-      }
+  try {
+    // Fetch ourselves with no-store. The timestamp also bypasses intermediary caches.
+    const separator = SHEET_CSV_URL.includes('?') ? '&' : '?';
+    const response = await fetch(`${SHEET_CSV_URL}${separator}cachebust=${Date.now()}`, {
+      cache: 'no-store',
+      headers: { 'Cache-Control': 'no-cache' }
     });
-  });
+    if (!response.ok) throw new Error(`CSV request failed: ${response.status}`);
+
+    const csvText = await response.text();
+    const parsed = Papa.parse(csvText, { header: true, skipEmptyLines: 'greedy' });
+    if (parsed.errors?.length && !parsed.data?.length) throw new Error(parsed.errors[0].message);
+
+    const rows = parsed.data.filter(row => getCell(row, 'type'));
+
+    Object.values(reportLayers).forEach(layer => layer.clearLayers());
+    counts = { total: 0, Overcrowding: 0, Delay: 0, Misconduct: 0, 'Lost Item': 0 };
+
+    for (const row of rows) {
+      const type = normaliseType(getCell(row, 'type'));
+      if (!COLORS[type]) continue;
+
+      counts.total++;
+      counts[type]++;
+
+      let latlng = null;
+      const rawLat = Number.parseFloat(getCell(row, 'lat'));
+      const rawLng = Number.parseFloat(getCell(row, 'lng'));
+      const stopName = getCell(row, 'stop');
+
+      if (Number.isFinite(rawLat) && Number.isFinite(rawLng) && rawLat !== 0 && rawLng !== 0) {
+        latlng = [rawLat, rawLng];
+      } else if (stopName) {
+        latlng = await geocodeStop(stopName);
+      }
+
+      // The report still contributes to the counters even when it has no mappable location.
+      if (!latlng) continue;
+
+      const color = COLORS[type];
+      const marker = L.circleMarker(latlng, {
+        radius: 9,
+        fillColor: color,
+        color: '#ffffff',
+        weight: 2,
+        fillOpacity: 0.9,
+        opacity: 1,
+      });
+
+      const crowding = getCell(row, 'crowding');
+      const delay = getCell(row, 'delay');
+      const description = getCell(row, 'desc');
+      const route = getCell(row, 'route');
+      const timeStr = getCell(row, 'time') || getCell(row, 'timestamp');
+
+      const crowdRow = crowding ? `<div class="popup-row"><span class="lbl">Crowding: </span>${escapeHtml(crowding)}</div>` : '';
+      const delayRow = delay ? `<div class="popup-row"><span class="lbl">Delay: </span>${escapeHtml(delay)} min</div>` : '';
+      const descRow = description ? `<div class="popup-row"><span class="lbl">Details: </span>${escapeHtml(description)}</div>` : '';
+
+      marker.bindPopup(`
+        <div class="popup-type" style="color:${color}">${TYPE_ICONS[type] || ''} ${type}</div>
+        <div class="popup-row"><span class="lbl">Route: </span>${escapeHtml(route || '—')}</div>
+        <div class="popup-row"><span class="lbl">Stop: </span>${escapeHtml(stopName || '—')}</div>
+        ${crowdRow}${delayRow}${descRow}
+        <div class="popup-row" style="margin-top:5px;color:#64748b;font-size:0.75rem">${escapeHtml(timeStr)}</div>
+      `);
+
+      reportLayers[type].addLayer(marker);
+    }
+
+    updateStats();
+    applyFilter(activeFilter);
+    hideLoading();
+    setRefreshState('live');
+  } catch (error) {
+    console.error(error);
+    showToast('⚠️ Could not read the live Google Sheet');
+    setRefreshState('live');
+    hideLoading();
+  }
+}
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>'"]/g, char => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+  })[char]);
 }
 
 // ── Stats display ─────────────────────────────
@@ -702,7 +751,7 @@ filterCtrl.onAdd = () => {
 filterCtrl.addTo(map);
 
 // ── Refresh countdown ─────────────────────────
-const REFRESH_INTERVAL = 60;
+const REFRESH_INTERVAL = 15;
 let countdown = REFRESH_INTERVAL;
 let refreshTimer = null;
 
@@ -758,8 +807,26 @@ function showToast(msg) {
 
 // ── Report form ───────────────────────────────
 function openReportForm() {
-  window.open(GOOGLE_FORM_URL, '_blank');
+  const url = new URL(GOOGLE_FORM_URL);
+
+  // Google Forms can only receive the current coordinates when Latitude and
+  // Longitude questions exist and their entry IDs are configured above.
+  if (currentLocation && FORM_ENTRY_LAT && FORM_ENTRY_LNG) {
+    url.searchParams.set(FORM_ENTRY_LAT, currentLocation.lat.toFixed(7));
+    url.searchParams.set(FORM_ENTRY_LNG, currentLocation.lng.toFixed(7));
+  }
+
+  window.open(url.toString(), '_blank');
 }
+
+// Refresh immediately when the user returns from the Google Form tab.
+window.addEventListener('focus', () => {
+  manualRefresh();
+});
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') manualRefresh();
+});
 
 // ── Boot ──────────────────────────────────────
 loadReports().then(() => startCountdown());
