@@ -405,13 +405,13 @@ const GOOGLE_FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSeGCGK3xjOS-F8
 
 // Column headers — must match your Google Sheet exactly
 const COL = {
-  type:      'Report Type',
+  type:      'Type of Reporting',
   route:     'Bus Route Number',
-  stop:      'Bus Stop / Location Name',
+  stop:      'Bus stop / Location name',
   crowding:  'Crowding Level',
   delay:     'Delay Duration (minutes)',
   desc:      'Issue Description',
-  time:      'Time of Incident',
+  time:      'Time',
   timestamp: 'Timestamp',
   lat:       'Latitude',
   lng:       'Longitude',
@@ -454,20 +454,41 @@ fetch('data/road_network.geojson').then(r => r.json()).then(data => {
 }).catch(() => {});
 
 let busStopsLayer = null;
-fetch('data/bus_stops.geojson').then(r => r.json()).then(data => {
-  const busStopIcon = L.divIcon({
-    className: '',
-    html: `<div style="width:9px;height:9px;background:#06b6d4;border-radius:50%;border:2px solid #fff;box-shadow:0 0 4px rgba(6,182,212,0.6)"></div>`,
-    iconSize: [9,9], iconAnchor: [4.5,4.5]
+fetch('data/bus_stops.geojson')
+  .then(r => {
+    if (!r.ok) throw new Error('bus_stops.geojson could not be loaded');
+    return r.json();
+  })
+  .then(data => {
+    const busStopIcon = L.divIcon({
+      className: '',
+      html: `<div style="width:9px;height:9px;background:#06b6d4;border-radius:50%;border:2px solid #fff;box-shadow:0 0 4px rgba(6,182,212,0.6)"></div>`,
+      iconSize: [9,9], iconAnchor: [4.5,4.5]
+    });
+
+    busStopsLayer = L.geoJSON(data, {
+      pointToLayer: (feature, latlng) => {
+        const p = feature.properties || {};
+        const name =
+          p.name || p.Name || p.stop_name || p.StopName ||
+          p.bus_stop || p.BusStop || 'Bus Stop';
+
+        rememberBusStop(name, [latlng.lat, latlng.lng]);
+        return L.marker(latlng, { icon: busStopIcon });
+      },
+      onEachFeature: (feature, layer) => {
+        const p = feature.properties || {};
+        const name =
+          p.name || p.Name || p.stop_name || p.StopName ||
+          p.bus_stop || p.BusStop || 'Bus Stop';
+
+        layer.bindPopup(`<b style="color:#06b6d4">🚏 ${name}</b>`);
+      }
+    }).addTo(map);
+  })
+  .catch(error => {
+    console.warn(error);
   });
-  busStopsLayer = L.geoJSON(data, {
-    pointToLayer: (f, ll) => L.marker(ll, { icon: busStopIcon }),
-    onEachFeature: (f, layer) => {
-      const n = f.properties.name || f.properties.Name || 'Bus Stop';
-      layer.bindPopup(`<b style="color:#06b6d4">🚏 ${n}</b>`);
-    }
-  }).addTo(map);
-}).catch(() => {});
 
 // ── User location ─────────────────────────────
 let userMarker = null;
@@ -526,21 +547,38 @@ Object.values(reportLayers).forEach(l => l.addTo(map));
 
 let activeFilter = 'all';
 
-// ── Geocode cache ──────────────────────────────
-const geocodeCache = {};
-async function geocodeStop(name) {
-  if (geocodeCache[name] !== undefined) return geocodeCache[name];
-  try {
-    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(name + ', Colombo, Sri Lanka')}&format=json&limit=1`;
-    const res  = await fetch(url);
-    const data = await res.json();
-    if (data.length) {
-      const ll = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
-      geocodeCache[name] = ll;
-      return ll;
+// ── Local bus-stop lookup ───────────────────────
+// This avoids repeated network permission popups in ChatGPT Preview.
+// Report locations are matched against data/bus_stops.geojson.
+const busStopLookup = new Map();
+
+function normalisePlaceName(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function rememberBusStop(name, latlng) {
+  const key = normalisePlaceName(name);
+  if (key && !busStopLookup.has(key)) {
+    busStopLookup.set(key, latlng);
+  }
+}
+
+function findLocalStop(name) {
+  const key = normalisePlaceName(name);
+  if (!key) return null;
+
+  if (busStopLookup.has(key)) return busStopLookup.get(key);
+
+  for (const [storedName, latlng] of busStopLookup.entries()) {
+    if (storedName.includes(key) || key.includes(storedName)) {
+      return latlng;
     }
-  } catch(e) {}
-  geocodeCache[name] = null;
+  }
+
   return null;
 }
 
@@ -553,81 +591,137 @@ let counts = { total: 0, Overcrowding: 0, Delay: 0, Misconduct: 0, 'Lost Item': 
 async function loadReports() {
   setRefreshState('loading');
 
-  // Cache-bust: force a fresh fetch from Google Sheets every time
   const bustUrl = SHEET_CSV_URL + '&cachebust=' + Date.now();
 
   return new Promise((resolve) => {
+    let finished = false;
+
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      hideLoading();
+      setRefreshState('live');
+      resolve();
+    };
+
+    const timeoutId = setTimeout(() => {
+      showToast('⚠️ Report loading timed out');
+      finish();
+    }, 15000);
+
     Papa.parse(bustUrl, {
       download: true,
       header: true,
       skipEmptyLines: true,
-      complete: async (results) => {
-        const rows = results.data.filter(r => r[COL.type] && r[COL.type].trim());
 
-        // Clear existing markers
-        Object.values(reportLayers).forEach(l => l.clearLayers());
-        counts = { total: 0, Overcrowding: 0, Delay: 0, Misconduct: 0, 'Lost Item': 0 };
+      complete: (results) => {
+        clearTimeout(timeoutId);
 
-        for (const row of rows) {
-          const type = (row[COL.type] || '').trim();
-          if (!COLORS[type]) continue;
-
-          counts.total++;
-          counts[type] = (counts[type] || 0) + 1;
-
-          // Prefer GPS coords stored by the report wrapper; fallback to geocoding
-          let latlng = null;
-          const rawLat = parseFloat(row[COL.lat]);
-          const rawLng = parseFloat(row[COL.lng]);
-
-          if (!isNaN(rawLat) && !isNaN(rawLng) && rawLat !== 0 && rawLng !== 0) {
-            latlng = [rawLat, rawLng];
-          } else if (row[COL.stop] && row[COL.stop].trim()) {
-            latlng = await geocodeStop(row[COL.stop].trim());
-          }
-
-          if (!latlng) continue;
-
-          const color = COLORS[type];
-
-          // Plain filled circle — no icon, no cluster badge, just a coloured dot
-          const marker = L.circleMarker(latlng, {
-            radius: 9,
-            fillColor: color,
-            color: '#ffffff',
-            weight: 2,
-            fillOpacity: 0.9,
-            opacity: 1,
+        try {
+          const rows = results.data.filter(row => {
+            const value = row[COL.type];
+            return value && String(value).trim();
           });
 
-          // Popup
-          const crowdRow = row[COL.crowding] ? `<div class="popup-row"><span class="lbl">Crowding: </span>${row[COL.crowding]}</div>` : '';
-          const delayRow = row[COL.delay]    ? `<div class="popup-row"><span class="lbl">Delay: </span>${row[COL.delay]} min</div>` : '';
-          const descRow  = row[COL.desc]     ? `<div class="popup-row"><span class="lbl">Details: </span>${row[COL.desc]}</div>` : '';
-          const timeStr  = row[COL.time] || row[COL.timestamp] || '';
+          Object.values(reportLayers).forEach(layer => layer.clearLayers());
+          counts = {
+            total: 0,
+            Overcrowding: 0,
+            Delay: 0,
+            Misconduct: 0,
+            'Lost Item': 0
+          };
 
-          marker.bindPopup(`
-            <div class="popup-type" style="color:${color}">${TYPE_ICONS[type] || ''} ${type}</div>
-            <div class="popup-row"><span class="lbl">Route: </span>${row[COL.route] || '—'}</div>
-            <div class="popup-row"><span class="lbl">Stop: </span>${row[COL.stop] || '—'}</div>
-            ${crowdRow}${delayRow}${descRow}
-            <div class="popup-row" style="margin-top:5px;color:#64748b;font-size:0.75rem">${timeStr}</div>
-          `);
+          for (const row of rows) {
+            let type = String(row[COL.type] || '').trim();
 
-          reportLayers[type].addLayer(marker);
+            if (type.toLowerCase() === 'lost item') type = 'Lost Item';
+            if (type.toLowerCase() === 'overcrowding') type = 'Overcrowding';
+            if (type.toLowerCase() === 'delay') type = 'Delay';
+            if (type.toLowerCase() === 'misconduct') type = 'Misconduct';
+
+            if (!COLORS[type]) continue;
+
+            counts.total++;
+            counts[type]++;
+
+            let latlng = null;
+            const rawLat = parseFloat(row[COL.lat]);
+            const rawLng = parseFloat(row[COL.lng]);
+
+            if (
+              Number.isFinite(rawLat) &&
+              Number.isFinite(rawLng) &&
+              rawLat !== 0 &&
+              rawLng !== 0
+            ) {
+              latlng = [rawLat, rawLng];
+            } else {
+              latlng = findLocalStop(row[COL.stop]);
+            }
+
+            if (!latlng) continue;
+
+            const color = COLORS[type];
+            const marker = L.circleMarker(latlng, {
+              radius: 9,
+              fillColor: color,
+              color: '#ffffff',
+              weight: 2,
+              fillOpacity: 0.9,
+              opacity: 1
+            });
+
+            const crowdRow = row[COL.crowding]
+              ? `<div class="popup-row"><span class="lbl">Crowding: </span>${row[COL.crowding]}</div>`
+              : '';
+
+            const delayRow = row[COL.delay]
+              ? `<div class="popup-row"><span class="lbl">Delay: </span>${row[COL.delay]} min</div>`
+              : '';
+
+            const descRow = row[COL.desc]
+              ? `<div class="popup-row"><span class="lbl">Details: </span>${row[COL.desc]}</div>`
+              : '';
+
+            const timeStr = row[COL.time] || row[COL.timestamp] || '';
+
+            marker.bindPopup(`
+              <div class="popup-type" style="color:${color}">
+                ${TYPE_ICONS[type] || ''} ${type}
+              </div>
+              <div class="popup-row">
+                <span class="lbl">Route: </span>${row[COL.route] || '—'}
+              </div>
+              <div class="popup-row">
+                <span class="lbl">Stop: </span>${row[COL.stop] || '—'}
+              </div>
+              ${crowdRow}
+              ${delayRow}
+              ${descRow}
+              <div class="popup-row" style="margin-top:5px;color:#64748b;font-size:0.75rem">
+                ${timeStr}
+              </div>
+            `);
+
+            reportLayers[type].addLayer(marker);
+          }
+
+          updateStats();
+          applyFilter(activeFilter);
+        } catch (error) {
+          console.error(error);
+          showToast('⚠️ Report data could not be processed');
         }
 
-        updateStats();
-        applyFilter(activeFilter);
-        hideLoading();
-        setRefreshState('live');
-        resolve();
+        finish();
       },
-      error: () => {
+
+      error: (error) => {
+        clearTimeout(timeoutId);
+        console.error(error);
         showToast('⚠️ Failed to load reports');
-        setRefreshState('live');
-        hideLoading();
-        resolve();
+        finish();
       }
     });
   });
@@ -830,7 +924,17 @@ updateDateTime();
 setInterval(updateDateTime, 1000);
 
 // ── Boot ──────────────────────────────────────
-loadReports().then(() => startCountdown());
+// Auto-refresh is enabled on the published GitHub Pages site.
+// In ChatGPT Preview, it stays manual to avoid repeated permission popups.
+const isPublishedSite = window.location.hostname.endsWith('github.io');
+
+loadReports().then(() => {
+  if (isPublishedSite) {
+    startCountdown();
+  } else {
+    document.getElementById('refresh-countdown').textContent = 'manual';
+  }
+});
 </script>
 
 <!-- Toast -->
